@@ -19,7 +19,8 @@ export default [
 				// The providers are called with Node's fetch
 				fetch: 'readonly',
 				URL: 'readonly',
-				URLSearchParams: 'readonly'
+				URLSearchParams: 'readonly',
+				structuredClone: 'readonly'
 			}
 		},
 		rules: {

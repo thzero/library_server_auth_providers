@@ -3,7 +3,10 @@
 
 # library_server_auth_providers
 
-Sign-in proof checks for [@thzero/library_server](https://github.com/thzero/library_server) auth servers. Each service takes the proof a client got from a sign-in provider, checks it with that provider, and answers who signed in. The auth server then finds or creates the user and issues its own token; nothing here knows about users or tokens.
+Sign-in through outside providers for [@thzero/library_server](https://github.com/thzero/library_server) auth servers, and accounts with several of them linked.
+
+- **Proof checks.** Each provider service takes the proof a client got from a sign-in provider, checks it with that provider, and answers who signed in.
+- **Accounts** (`accounts/index.js`, `AccountsService`). Signs in with a provider's identity (the user that sign-in is linked to, or a new one), links another sign-in to the signed-in user, merges two accounts once the player confirms, and unlinks. The auth server keeps its own token: the app's rules are hooks.
 
 | Service | Proof | Answers |
 | --- | --- | --- |
@@ -13,6 +16,36 @@ Sign-in proof checks for [@thzero/library_server](https://github.com/thzero/libr
 | `steam/index.js` (`SteamOpenIdService`) | the `openid.*` fields Steam's OpenID 2.0 sign-in returned to the client | `{ externalType: 'steam', externalId }` (the SteamID64) |
 
 Every service has one method, `verify(correlationId, proof)`, and answers a library response: `success` with `results`, or an error with a message saying why the proof was refused.
+
+## Accounts
+
+A user records its sign-ins in `logins` (`[ { type, id } ]`); a user whose identity is an external account (a game's EOS account) also matches on `external` (`{ type, id }`).
+
+| Method | What it does |
+| --- | --- |
+| `signInWith(correlationId, identity)` | The user a provider's identity is linked to, or a new one (`_newUser`), with the sign-in recorded; answers the app's sign-in (`_signIn`). |
+| `account(correlationId, user)` | `{ id, logins: [ { type, id, locked } ], primary }` for the client. |
+| `link(correlationId, user, proof)` | Checks the proof with its provider and links it: `{ status: 'linked', account }`, or `{ status: 'conflict', ticket, ...details }` when that sign-in has its own account. |
+| `linkConfirm(correlationId, user, { ticket })` | Merges the two: the primary account survives (`_isPrimary`), otherwise the signed-in one. The other is retired (no sign-ins, `mergedInto` set). Answers the survivor's sign-in. |
+| `unlink(correlationId, user, { type, id })` | Never the last sign-in, nor a locked one (`_isLocked`: by default the user's external account). |
+| `mergeLinked(correlationId, user, identity, created)` | Folds an account linked to the same sign-in into `user`, for a sign-in that always lands on its own account. |
+| `currentUser(correlationId, user)` | Follows `mergedInto`, so a token issued before a merge still reaches the survivor. |
+
+Merge tickets are short-lived JWTs signed with the login token's keys (config `auth.jwt`), with a `typ`, so a token check that refuses typed tokens never takes one as a login. A provider's answer can be single use (Steam's is), so the merge uses the ticket instead of the answer.
+
+The app subclasses `AccountsService` for its rules:
+
+| Hook | Default |
+| --- | --- |
+| `_signIn(correlationId, user)` | none: issue the app's login token, `{ token, user }` |
+| `_newUser(correlationId, identity)` | a new id, no plan, no roles |
+| `_isPrimary(user)` | `false` |
+| `_canMerge(correlationId, user, other)` | allowed (two primary accounts are always refused) |
+| `_conflictDetails(correlationId, other)` | `{}` |
+| `_mergeInto(survivor, retired, created)` | the retired account's sign-ins and roles; its claims and plan when the survivor has none |
+| `_isLocked(user, login)` | the user's external account |
+
+The users repository (`REPOSITORY_USERS`) needs `fetch(correlationId, id)`, `updateFromExternal(correlationId, id, user)` (saves the whole user, creating it when new), and `fetchByLogin(correlationId, type, id, excludeId)`, which must never answer a retired user. [@thzero/library_server_repository_mongo](https://github.com/thzero/library_server_repository_mongo)'s `BaseUserMongoRepository` has all three. The provider services are found by the injector keys in `constants.js`.
 
 The pairing client library is [@thzero/library_client_auth_providers](https://github.com/thzero/library_client_auth_providers), which gets these proofs in the browser.
 
