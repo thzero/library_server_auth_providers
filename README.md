@@ -7,6 +7,7 @@ Sign-in through outside providers for [@thzero/library_server](https://github.co
 
 - **Proof checks.** Each provider service takes the proof a client got from a sign-in provider, checks it with that provider, and answers who signed in.
 - **Accounts** (`accounts/index.js`, `AccountsService`). Signs in with a provider's identity (the user that sign-in is linked to, or a new one), links another sign-in to the signed-in user, merges two accounts once the player confirms, and unlinks. The auth server keeps its own token: the app's rules are hooks.
+- **Renewals** (`renewals/index.js`, `RenewalsService`). Renewal keys, so a browser stays signed in past its short-lived login token.
 
 | Service | Proof | Answers |
 | --- | --- | --- |
@@ -48,6 +49,20 @@ The app subclasses `AccountsService` for its rules:
 The users repository (`REPOSITORY_USERS`) needs `fetch(correlationId, id)`, `updateFromExternal(correlationId, id, user)` (saves the whole user, creating it when new), and `fetchByLogin(correlationId, type, id, excludeId)`, which must never answer a retired user. [@thzero/library_server_repository_mongo](https://github.com/thzero/library_server_repository_mongo)'s `BaseUserMongoRepository` has all three. The provider services are found by the injector keys in `constants.js`.
 
 The pairing client library is [@thzero/library_client_auth_providers](https://github.com/thzero/library_client_auth_providers), which gets these proofs in the browser.
+
+## Renewals
+
+A browser sign-in gets a renewal key beside its login token. Before the token expires, or on a later visit after it has, the browser trades the key for a new token and a new key; signing out deletes it. Each key works once: a renewal replaces it, so a copied key stops working as soon as either copy is used. A key unused for `auth.renewal.days` (30 by default) expires.
+
+| Method | What it does |
+| --- | --- |
+| `issue(correlationId, user)` | A new key: `{ renewal, renewalExpiresAt }`. |
+| `renew(correlationId, renewal)` | `{ user, renewal, renewalExpiresAt }`, the user followed through `mergedInto`; the old key stops working. Refuses a key that's unknown, used, expired or forged. |
+| `revoke(correlationId, renewal)` | Deletes the key. Succeeds whether or not it was known. |
+
+A key is `<id>.<secret>`; only a SHA-256 hash of the secret is stored. The app issues the login token itself: it adds `issue`'s answer to a browser sign-in (in its `_signIn`), and answers `renew` with a new token for the user. A game client that signs in again on every start doesn't need a key.
+
+The renewals repository (`REPOSITORY_AUTH_RENEWALS`) needs `create(correlationId, { id, userId, hash, expiresAt })`, `fetch(correlationId, id)` and `delete(correlationId, id)`, which answers whether it deleted (so two renewals with one key can't both succeed). Give `expiresAt` a TTL index so the store drops expired keys itself. It also uses the users repository and the accounts service.
 
 ## Requirements
 
