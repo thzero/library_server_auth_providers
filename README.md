@@ -38,7 +38,7 @@ The app subclasses `AccountsService` for its rules:
 
 | Hook | Default |
 | --- | --- |
-| `_signIn(correlationId, user)` | none: issue the app's login token, `{ token, user }` |
+| `_signIn(correlationId, user, identity)` | none: issue the app's login token, `{ token, user }`. `identity` is the sign-in (`{ externalType, externalId, name }`); its `name` is the provider's name for the player when it gives one (Discord, Firebase), for the app to put in its token. Nothing here stores it. |
 | `_newUser(correlationId, identity)` | a new id, no plan, no roles |
 | `_isPrimary(user)` | `false` |
 | `_canMerge(correlationId, user, other)` | allowed (two primary accounts are always refused) |
