@@ -41,11 +41,13 @@ class GameAccountsService extends AccountsService {
 		return { id: `new${++created}`, planId: BASIC, roles: [ 'user' ] };
 	}
 
-	async _signIn(correlationId, user) {
+	async _signIn(correlationId, user, identity) {
+		signedInWith = identity;
 		return this._successResponse({ token: `token:${user.id}`, user }, correlationId);
 	}
 }
 
+let signedInWith = null;
 let users;
 let games;
 let created;
@@ -88,6 +90,13 @@ describe('AccountsService.signInWith', () => {
 		const second = await service.signInWith('c', { externalType: 'discord', externalId: 'd1' });
 		assert.equal(second.results.user.id, 'new1');
 		assert.equal(users.size, 1);
+	});
+
+	it('hands the sign-in, with its name, to the app, and stores no name', async () => {
+		await service.signInWith('c', { externalType: 'discord', externalId: 'd2', name: 'Disco' });
+		assert.equal(signedInWith.name, 'Disco');
+		const stored = [ ...users.values() ].find((user) => user.logins?.some((login) => login.id === 'd2'));
+		assert.equal(JSON.stringify(stored).includes('Disco'), false);
 	});
 
 	it('finds a game account by its external account', async () => {

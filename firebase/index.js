@@ -58,6 +58,7 @@ class FirebaseIdTokenService extends Service {
 			return this._successResponse({
 				externalType: 'firebase',
 				externalId: uid,
+				name: payload.name ?? null,
 				provider: payload.firebase?.sign_in_provider ?? null
 			}, correlationId);
 		}

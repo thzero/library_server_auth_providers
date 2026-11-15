@@ -30,7 +30,8 @@ const ALLOWED_ALGORITHMS = [ 'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512
 // services (SERVICE_AUTH_DISCORD, _FIREBASE, _STEAM) for the proofs it checks.
 //
 // The app's rules are hooks:
-//  - _signIn: issues the app's login token for a user ({ token, user });
+//  - _signIn: issues the app's login token for a user ({ token, user }), given the sign-in's
+//    identity (its name, when the provider gave one, is the app's to use; nothing here stores it);
 //  - _newUser: what a new user starts with;
 //  - _isPrimary: an account that must survive a merge (a game's EOS account, for one);
 //  - _canMerge: whether two accounts may merge (refuse with an error response);
@@ -86,7 +87,8 @@ class AccountsService extends Service {
 					userId: user.id,
 					otherId: other.results.id,
 					type: identity.externalType,
-					id: identity.externalId
+					id: identity.externalId,
+					name: identity.name ?? null
 				});
 				const details = await this._conflictDetails(correlationId, other.results);
 				return this._successResponse({ ...details, status: 'conflict', ticket }, correlationId);
@@ -137,7 +139,7 @@ class AccountsService extends Service {
 			if (this._hasFailed(survivorResponse))
 				return survivorResponse;
 
-			return await this._signIn(correlationId, survivorResponse.results);
+			return await this._signIn(correlationId, survivorResponse.results, { externalType: payload.type, externalId: payload.id, name: payload.name ?? null });
 		}
 		catch (err) {
 			return this._error('AccountsService', 'linkConfirm', null, err, null, null, correlationId);
@@ -176,7 +178,7 @@ class AccountsService extends Service {
 			const updateResponse = await this._repositoryUsers.updateFromExternal(correlationId, user.id, user);
 			if (this._hasFailed(updateResponse))
 				return updateResponse;
-			return await this._signIn(correlationId, updateResponse.results);
+			return await this._signIn(correlationId, updateResponse.results, identity);
 		}
 		catch (err) {
 			return this._error('AccountsService', 'signInWith', null, err, null, null, correlationId);
@@ -280,7 +282,7 @@ class AccountsService extends Service {
 	}
 
 	// The app's login token for [user]: { token, user }.
-	async _signIn(correlationId, user) {
+	async _signIn(correlationId, user, identity) {
 		throw new Error('AccountsService._signIn: issue the app\'s login token.');
 	}
 
