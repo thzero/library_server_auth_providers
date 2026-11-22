@@ -64,10 +64,21 @@ class AccountsService extends Service {
 
 	// The user [user] stands for now: the account it was merged into, if it was.
 	async currentUser(correlationId, user) {
-		if (!user?.mergedInto)
-			return this._successResponse(user, correlationId);
-		return await this._repositoryUsers.fetch(correlationId, user.mergedInto);
+		const seen = new Set();
+		while (user?.mergedInto) {
+			if (seen.has(user.mergedInto) || (seen.size >= AccountsService.MergeHopsMax))
+				return this._error('AccountsService', 'currentUser', 'The account merge chain does not end.', null, null, null, correlationId);
+			seen.add(user.mergedInto);
+
+			const response = await this._repositoryUsers.fetch(correlationId, user.mergedInto);
+			if (this._hasFailed(response) || !response.results)
+				return this._hasFailed(response) ? response : this._error('AccountsService', 'currentUser', 'The account it was merged into is missing.', null, null, null, correlationId);
+			user = response.results;
+		}
+		return this._successResponse(user, correlationId);
 	}
+
+	static MergeHopsMax = 10;
 
 	// Links another sign-in to the signed-in [user]. [request] is the sign-in's proof:
 	// { type: 'steam', params }, { type: 'firebase', idToken } or { type: 'discord', code }.
@@ -132,12 +143,12 @@ class AccountsService extends Service {
 			this._mergeInto(survivor, retired, false);
 			survivor.logins = this._addLogin(survivor.logins, payload.type, payload.id);
 
-			const response = await this._retire(correlationId, survivor, retired);
-			if (this._hasFailed(response))
-				return response;
 			const survivorResponse = await this._repositoryUsers.updateFromExternal(correlationId, survivor.id, survivor);
 			if (this._hasFailed(survivorResponse))
 				return survivorResponse;
+			const response = await this._retire(correlationId, survivor, retired);
+			if (this._hasFailed(response))
+				return response;
 
 			return await this._signIn(correlationId, survivorResponse.results, { externalType: payload.type, externalId: payload.id, name: payload.name ?? null });
 		}
@@ -149,7 +160,7 @@ class AccountsService extends Service {
 	// Folds another account linked to the same sign-in ([identity]: { externalType, externalId })
 	// into [user], which must keep it (a primary account on its own sign-in). [user] takes the
 	// other's sign-ins, and when [created] (it's new), what _mergeInto gives a new account. Changes
-	// [user] in place; the caller saves it.
+	// [user] in place and saves it.
 	async mergeLinked(correlationId, user, identity, created) {
 		if (!identity?.externalType || !identity?.externalId)
 			return this._success(correlationId);
@@ -160,6 +171,9 @@ class AccountsService extends Service {
 		const other = this._storedUser(linked.results);
 
 		this._mergeInto(user, other, created);
+		const userResponse = await this._repositoryUsers.updateFromExternal(correlationId, user.id, user);
+		if (this._hasFailed(userResponse))
+			return userResponse;
 		return await this._retire(correlationId, user, other);
 	}
 
