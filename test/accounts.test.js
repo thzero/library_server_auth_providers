@@ -203,3 +203,69 @@ describe('AccountsService defaults', () => {
 		assert.equal(response.success, false);
 	});
 });
+
+describe('AccountsService merge ordering', () => {
+	it('keeps every sign-in when saving the survivor fails, and a second try finishes the merge', async () => {
+		add({ id: 'g1', planId: 'paid', roles: [ 'user' ], logins: [ { type: 'firebase', id: 'f1' } ] });
+		add({ id: PUID, planId: BASIC, roles: [ 'user' ], external: { type: 'steam', id: 's1' }, logins: [ { type: 'steam', id: 's1' } ] });
+		const conflict = await service.link('c', users.get('g1'), proof('steam', 's1'));
+
+		const save = repository.updateFromExternal;
+		repository.updateFromExternal = async (correlationId, id, user) => {
+			if (id === PUID)
+				return { success: false, results: null, correlationId };
+			return save(correlationId, id, user);
+		};
+		try {
+			const failed = await service.linkConfirm('c', users.get('g1'), { ticket: conflict.results.ticket });
+			assert.equal(failed.success, false);
+		}
+		finally {
+			repository.updateFromExternal = save;
+		}
+
+		assert.deepEqual(users.get('g1').logins, [ { type: 'firebase', id: 'f1' } ], 'the other account still has its sign-in');
+		assert.equal(users.get('g1').mergedInto, undefined);
+
+		const again = await service.link('c', users.get('g1'), proof('steam', 's1'));
+		const merged = await service.linkConfirm('c', users.get('g1'), { ticket: again.results.ticket });
+		assert.equal(merged.results.token, `token:${PUID}`);
+		assert.equal(users.get('g1').mergedInto, PUID);
+	});
+
+	it('mergeLinked saves the survivor before retiring the other', async () => {
+		const order = [];
+		const save = repository.updateFromExternal;
+		repository.updateFromExternal = async (correlationId, id, user) => { order.push(id); return save(correlationId, id, user); };
+		try {
+			add({ id: 'g1', logins: [ { type: 'steam', id: 's1' } ] });
+			const user = { id: PUID, logins: [] };
+			add(user);
+			await service.mergeLinked('c', user, { externalType: 'steam', externalId: 's1' }, true);
+		}
+		finally {
+			repository.updateFromExternal = save;
+		}
+		assert.deepEqual(order, [ PUID, 'g1' ]);
+	});
+});
+
+describe('AccountsService.currentUser', () => {
+	it('follows a chain of merges to the end', async () => {
+		add({ id: 'a', mergedInto: 'b' });
+		add({ id: 'b', mergedInto: 'c' });
+		add({ id: 'c', logins: [ { type: 'steam', id: 's1' } ] });
+		assert.equal((await service.currentUser('c', users.get('a'))).results.id, 'c');
+	});
+
+	it('refuses a chain that loops', async () => {
+		add({ id: 'a', mergedInto: 'b' });
+		add({ id: 'b', mergedInto: 'a' });
+		assert.equal((await service.currentUser('c', users.get('a'))).success, false);
+	});
+
+	it('refuses a chain that ends in a missing account', async () => {
+		add({ id: 'a', mergedInto: 'gone' });
+		assert.equal((await service.currentUser('c', users.get('a'))).success, false);
+	});
+});
